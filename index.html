@@ -224,6 +224,109 @@
 
         .empty-state { text-align: center; padding: 2.5rem; color: var(--text-muted); }
 
+        /* Preview panel */
+        .preview-panel {
+            display: none;
+            margin-top: 0.875rem;
+            border-top: 1px solid var(--border);
+            padding-top: 0.875rem;
+        }
+        .preview-panel.open { display: block; }
+        .preview-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .preview-search {
+            flex: 1;
+            min-width: 160px;
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-pri);
+            font-size: 0.82rem;
+            padding: 0.35rem 0.75rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .preview-search::placeholder { color: var(--text-muted); }
+        .preview-search:focus { border-color: var(--accent); }
+        .preview-count {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+        .preview-scroll {
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            max-height: 320px;
+            overflow-y: auto;
+            padding: 0.5rem;
+        }
+        .preview-scroll::-webkit-scrollbar { width: 5px; }
+        .preview-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        .sub-entry {
+            display: flex;
+            gap: 0.75rem;
+            padding: 0.5rem 0.6rem;
+            border-radius: 7px;
+            transition: background 0.15s;
+        }
+        .sub-entry:hover { background: rgba(255,255,255,0.04); }
+        .sub-entry.hidden { display: none; }
+        .sub-entry.highlighted { background: rgba(99,179,237,0.1); }
+        .sub-num {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            min-width: 26px;
+            padding-top: 2px;
+            text-align: right;
+            font-family: 'Courier New', monospace;
+            user-select: none;
+        }
+        .sub-body { flex: 1; }
+        .sub-time {
+            font-size: 0.72rem;
+            color: var(--accent);
+            font-family: 'Courier New', monospace;
+            margin-bottom: 2px;
+        }
+        .sub-text {
+            font-size: 0.88rem;
+            color: var(--text-pri);
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }
+        .sub-text mark {
+            background: rgba(246,173,85,0.35);
+            color: var(--orange);
+            border-radius: 2px;
+            padding: 0 1px;
+        }
+        .no-results {
+            text-align: center;
+            padding: 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            display: none;
+        }
+        .preview-toggle {
+            background: rgba(99,179,237,0.1);
+            color: var(--accent);
+            border: 1px solid rgba(99,179,237,0.25);
+            padding: 0.45rem 0.9rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.82rem;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .preview-toggle:hover { background: rgba(99,179,237,0.18); }
+
         @media (max-width: 600px) {
             h1 { font-size: 1.7rem; }
             .drop-zone { padding: 2rem 1rem; }
@@ -838,6 +941,80 @@ async function handleFile(file) {
     }
 }
 
+function parseSRTEntries(content) {
+    const entries = [];
+    const blocks = content.trim().split(/\n\s*\n/);
+    for (const block of blocks) {
+        const lines = block.trim().split('\n');
+        if (lines.length < 3) continue;
+        const num = lines[0].trim();
+        const time = lines[1].trim();
+        const text = lines.slice(2).join('\n').trim();
+        if (time.includes('-->') && text) entries.push({ num, time, text });
+    }
+    return entries;
+}
+
+function buildPreviewPanel(srt, idx) {
+    const entries = parseSRTEntries(srt.content);
+    const panel = document.createElement('div');
+    panel.className = 'preview-panel';
+    panel.id = `preview-${idx}`;
+
+    panel.innerHTML = `
+        <div class="preview-toolbar">
+            <input class="preview-search" type="text" placeholder="Search subtitles…" id="search-${idx}" autocomplete="off">
+            <span class="preview-count" id="pcount-${idx}">${entries.length} lines</span>
+        </div>
+        <div class="preview-scroll" id="pscroll-${idx}">
+            ${entries.map((e, i) => `
+                <div class="sub-entry" data-i="${i}">
+                    <div class="sub-num">${e.num}</div>
+                    <div class="sub-body">
+                        <div class="sub-time">${escapeHtml(e.time)}</div>
+                        <div class="sub-text" data-raw="${escapeHtml(e.text)}">${escapeHtml(e.text)}</div>
+                    </div>
+                </div>`).join('')}
+            <div class="no-results" id="nores-${idx}">No matches found</div>
+        </div>
+    `;
+
+    // Search logic
+    const searchEl = panel.querySelector(`#search-${idx}`);
+    const countEl  = panel.querySelector(`#pcount-${idx}`);
+    const noRes    = panel.querySelector(`#nores-${idx}`);
+    const allEntries = panel.querySelectorAll('.sub-entry');
+    const allTexts  = panel.querySelectorAll('.sub-text');
+
+    searchEl.addEventListener('input', () => {
+        const q = searchEl.value.trim().toLowerCase();
+        let visible = 0;
+        allEntries.forEach((row, i) => {
+            const raw = entries[i].text.toLowerCase();
+            const textEl = allTexts[i];
+            if (!q || raw.includes(q)) {
+                row.classList.remove('hidden');
+                row.classList.toggle('highlighted', !!q);
+                if (q) {
+                    const escaped = entries[i].text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                    textEl.innerHTML = escaped.replace(re, m => `<mark>${m}</mark>`);
+                } else {
+                    textEl.innerHTML = escapeHtml(entries[i].text);
+                }
+                visible++;
+            } else {
+                row.classList.add('hidden');
+                row.classList.remove('highlighted');
+            }
+        });
+        countEl.textContent = q ? `${visible} of ${entries.length} lines` : `${entries.length} lines`;
+        noRes.style.display = visible === 0 ? 'block' : 'none';
+    });
+
+    return panel;
+}
+
 function renderResults(data) {
     tracksList.innerHTML = '';
     if (data.srts.length === 0) {
@@ -855,14 +1032,33 @@ function renderResults(data) {
                         <div class="track-title">${escapeHtml(tr.name || 'Subtitle Track')} <span class="badge badge-sub">${tr.language || 'und'}</span> <span class="badge badge-detecting" id="lang-badge-${idx}">Detecting…</span></div>
                         <div class="track-meta">${escapeHtml(tr.codecId)} • ${srt.count} lines • ${formatBytes(srt.content.length)}</div>
                     </div>
-                    <button class="download-btn" data-idx="${idx}">Download SRT</button>
+                    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                        <button class="preview-toggle" data-idx="${idx}">Preview</button>
+                        <button class="download-btn" data-idx="${idx}">Download SRT</button>
+                    </div>
                 </div>
             `;
+
+            // Append preview panel
+            card.appendChild(buildPreviewPanel(srt, idx));
             tracksList.appendChild(card);
         });
 
         tracksList.querySelectorAll('.download-btn').forEach(btn => {
             btn.addEventListener('click', () => downloadSRT(parseInt(btn.dataset.idx)));
+        });
+        tracksList.querySelectorAll('.preview-toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = btn.dataset.idx;
+                const panel = document.getElementById(`preview-${idx}`);
+                const open = panel.classList.toggle('open');
+                btn.textContent = open ? 'Hide preview' : 'Preview';
+                if (open) {
+                    // Focus search and scroll panel into view
+                    const s = document.getElementById(`search-${idx}`);
+                    if (s) setTimeout(() => { s.focus(); panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
+                }
+            });
         });
     }
     results.classList.add('visible');
