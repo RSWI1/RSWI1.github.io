@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MKV Subtitle Extractor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+        }
+        .container { max-width: 900px; width: 100%; }
+        h1 { font-size: 2.5rem; margin-bottom: 0.5rem; text-align: center; font-weight: 700; }
+        .subtitle { text-align: center; opacity: 0.85; margin-bottom: 2rem; font-size: 1.1rem; }
+        .drop-zone {
+            border: 3px dashed rgba(255,255,255,0.3);
+            border-radius: 16px;
+            padding: 3rem 2rem;
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 1.5rem;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: #00d4ff;
+            background: rgba(0,212,255,0.1);
+            transform: translateY(-2px);
+        }
+        .drop-zone svg { width: 64px; height: 64px; margin-bottom: 1rem; opacity: 0.8; }
+        .drop-text { font-size: 1.2rem; font-weight: 500; }
+        .drop-hint { font-size: 0.9rem; opacity: 0.6; margin-top: 0.5rem; }
+        input[type="file"] { display: none; }
+
+        .progress-box {
+            display: none;
+            background: rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            backdrop-filter: blur(10px);
+        }
+        .progress-box.visible { display: block; }
+        .progress-bar {
+            width: 100%; height: 10px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        .progress-fill {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #00d4ff, #0099cc);
+            transition: width 0.3s ease;
+            border-radius: 5px;
+        }
+        .log { font-family: 'Courier New', monospace; font-size: 0.85rem; opacity: 0.8; margin-top: 0.5rem; max-height: 120px; overflow-y: auto; }
+        .log div { margin: 2px 0; }
+
+        .results {
+            display: none;
+            background: rgba(255,255,255,0.95);
+            color: #1a1a2e;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+        .results.visible { display: block; }
+        .results h2 { color: #0f3460; margin-bottom: 1rem; font-size: 1.3rem; }
+        .track-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid #0099cc;
+        }
+        .track-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .track-title { font-weight: 700; font-size: 1.05rem; color: #1a1a2e; }
+        .track-meta { font-size: 0.85rem; color: #666; }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .badge-sub { background: #e3f2fd; color: #1565c0; }
+        .badge-count { background: #e8f5e9; color: #2e7d32; }
+        .badge-lang { background: #fff3e0; color: #e65100; }
+        .badge-detecting { background: #f3e5f5; color: #6a1b9a; animation: pulse 1.2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        .download-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .download-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+        .download-all {
+            width: 100%;
+            margin-top: 1rem;
+            padding: 0.875rem;
+            font-size: 1rem;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        .empty-state { text-align: center; padding: 2rem; color: #666; }
+        @media (max-width: 600px) {
+            h1 { font-size: 1.8rem; }
+            .drop-zone { padding: 2rem 1rem; }
+        }
+    </style>
+<base target="_blank">
+</head>
+<body>
+    <div class="container">
+        <h1>MKV Subtitle Extractor</h1>
+        <p class="subtitle">Extract all subtitle tracks from MKV files directly in your browser</p>
+
+        <div class="drop-zone" id="dropZone">
+            <input type="file" id="fileInput" accept=".mkv,.webm,video/x-matroska">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <div class="drop-text">Click or drop MKV files here</div>
+            <div class="drop-hint">All subtitle tracks will be extracted to SRT format</div>
+        </div>
+
+        <div class="progress-box" id="progressBox">
+            <div id="statusText">Initializing...</div>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <div class="log" id="log"></div>
+        </div>
+
+        <div class="results" id="results">
+            <h2>Extracted Subtitle Tracks</h2>
+            <div id="tracksList"></div>
+            <button class="download-btn download-all" id="downloadAll">Download All as ZIP</button>
+        </div>
+    </div>
+
+<script>
+// ===== EBML / Matroska Binary Parser =====
+class MKVParser {
+    constructor(buffer) {
+        this.data = new Uint8Array(buffer);
+        this.offset = 0;
+        this.length = this.data.length;
+    }
+
+    // EBML Element IDs: leading bits are PART of the ID value
+    readID() {
+        if (this.offset >= this.length) return null;
+        const first = this.data[this.offset];
+        let len = 1;
+        if (first >= 0x80) len = 1;
+        else if (first >= 0x40) len = 2;
+        else if (first >= 0x20) len = 3;
+        else if (first >= 0x10) len = 4;
+        else return null; // Invalid ID start byte
+
+        if (this.offset + len > this.length) return null;
+        let val = 0;
+        for (let i = 0; i < len; i++) {
+            val = (val << 8) | this.data[this.offset + i];
+        }
+        this.offset += len;
+        return { length: len, value: val };
+    }
+
+    // VINT: used for element sizes and track numbers. Leading '1' is only a length marker.
+    readVINT() {
+        if (this.offset >= this.length) return null;
+        const first = this.data[this.offset];
+        let len = 1;
+        if (first >= 0x80) len = 1;
+        else if (first >= 0x40) len = 2;
+        else if (first >= 0x20) len = 3;
+        else if (first >= 0x10) len = 4;
+        else if (first >= 0x08) len = 5;
+        else if (first >= 0x04) len = 6;
+        else if (first >= 0x02) len = 7;
+        else if (first === 0x01) len = 8;
+        else { this.offset++; return { length: 1, value: 0, unknown: false }; }
+
+        if (this.offset + len > this.length) return null;
+        const mask = (1 << (8 - len)) - 1;
+        let val = BigInt(first & mask);
+        for (let i = 1; i < len; i++) {
+            val = (val << 8n) | BigInt(this.data[this.offset + i]);
+        }
+        const maxVal = (1n << BigInt(7 * len)) - 1n;
+        const unknown = val === maxVal;
+        this.offset += len;
+        return { length: len, value: unknown ? -1 : Number(val), unknown };
+    }
+
+    readElement() {
+        const id = this.readID();
+        if (!id) return null;
+        const size = this.readVINT();
+        if (!size) return null;
+        return { id: id.value, size: size.value, dataOffset: this.offset, unknown: size.unknown };
+    }
+
+    readUInt(bytes) {
+        let v = 0;
+        for (let i = 0; i < bytes && this.offset < this.length; i++) {
+            v = (v << 8) | this.data[this.offset++];
+        }
+        return v;
+    }
+
+    readSignedInt16() {
+        const v = (this.data[this.offset] << 8) | this.data[this.offset + 1];
+        this.offset += 2;
+        return v >= 0x8000 ? v - 0x10000 : v;
+    }
+
+    readString(bytes) {
+        const slice = this.data.slice(this.offset, this.offset + bytes);
+        this.offset += bytes;
+        let end = slice.length;
+        for (let i = 0; i < slice.length; i++) if (slice[i] === 0) { end = i; break; }
+        return new TextDecoder().decode(slice.slice(0, end));
+    }
+
+    readBytes(bytes) {
+        const slice = this.data.slice(this.offset, this.offset + bytes);
+        this.offset += bytes;
+        return slice;
+    }
+
+    skip(bytes) { this.offset += bytes; }
+    getOffset() { return this.offset; }
+    setOffset(o) { this.offset = o; }
+}
+
+// ===== Matroska Element IDs =====
+const ID_EBML = 0x1A45DFA3;
+const ID_SEGMENT = 0x18538067;
+const ID_INFO = 0x1549A966;
+const ID_TRACKS = 0x1654AE6B;
+const ID_TRACK_ENTRY = 0xAE;
+const ID_TRACK_NUMBER = 0xD7;
+const ID_TRACK_UID = 0x73C5;
+const ID_TRACK_TYPE = 0x83;
+const ID_CODEC_ID = 0x86;
+const ID_LANGUAGE = 0x22B59C;
+const ID_TRACK_NAME = 0x536E;
+const ID_CODEC_PRIVATE = 0x63A2;
+const ID_TIMECODE_SCALE = 0x2AD7B1;
+const ID_CLUSTER = 0x1F43B675;
+const ID_CLUSTER_TIMECODE = 0xE7;
+const ID_SIMPLE_BLOCK = 0xA3;
+const ID_BLOCK_GROUP = 0xA0;
+const ID_BLOCK = 0xA1;
+const ID_BLOCK_DURATION = 0x9B;
+const ID_VOID = 0xEC;
+
+const SUBTITLE_CODEC = 0x11;
+
+// ===== Parse one TrackEntry =====
+function parseTrackEntry(parser, offset, size, parentEnd) {
+    const end = (size < 0) ? parentEnd : offset + size;
+    parser.setOffset(offset);
+    const track = { number: null, uid: null, type: null, codecId: '', language: 'und', name: '', codecPrivate: null };
+    while (parser.getOffset() < end) {
+        const el = parser.readElement();
+        if (!el) break;
+        const elEnd = el.unknown ? end : el.dataOffset + el.size;
+        if (el.id === ID_TRACK_NUMBER) track.number = parser.readUInt(el.size);
+        else if (el.id === ID_TRACK_UID) track.uid = parser.readUInt(el.size);
+        else if (el.id === ID_TRACK_TYPE) track.type = parser.readUInt(el.size);
+        else if (el.id === ID_CODEC_ID) track.codecId = parser.readString(el.size);
+        else if (el.id === ID_LANGUAGE) track.language = parser.readString(el.size);
+        else if (el.id === ID_TRACK_NAME) track.name = parser.readString(el.size);
+        else if (el.id === ID_CODEC_PRIVATE) track.codecPrivate = parser.readBytes(el.size);
+        parser.setOffset(elEnd);
+    }
+    return track;
+}
+
+// ===== Parse Block / SimpleBlock =====
+function parseBlock(parser, offset, size, clusterTimecode, timecodeScale) {
+    parser.setOffset(offset);
+    const end = offset + size;
+
+    const tn = parser.readVINT();
+    if (!tn) return null;
+    const trackNumber = tn.value;
+
+    if (parser.getOffset() + 2 > end) return null;
+    const relTime = parser.readSignedInt16();
+
+    if (parser.getOffset() + 1 > end) return null;
+    const flags = parser.data[parser.getOffset()];
+    parser.skip(1);
+
+    const lacing = (flags & 0x06) >> 1;
+    let data = null;
+
+    if (lacing === 0) {
+        if (parser.getOffset() < end) data = parser.readBytes(end - parser.getOffset());
+    } else if (parser.getOffset() < end) {
+        const frameCount = parser.data[parser.getOffset()];
+        parser.skip(1);
+        if (frameCount === 0) {
+            data = parser.readBytes(end - parser.getOffset());
+        } else {
+            if (lacing === 1) { // Xiph
+                for (let i = 0; i < frameCount; i++) {
+                    while (parser.getOffset() < end && parser.data[parser.getOffset()] === 0xFF) parser.skip(1);
+                    if (parser.getOffset() < end) parser.skip(1);
+                }
+            } else if (lacing === 2) { // EBML
+                parser.readVINT(); // first size
+                for (let i = 0; i < frameCount - 1; i++) parser.readVINT(); // diffs
+            } else if (lacing === 3) { // Fixed-size: skip nothing, frames are equal
+                // no size table
+            }
+            if (parser.getOffset() < end) data = parser.readBytes(end - parser.getOffset());
+        }
+    }
+
+    if (!data || data.length === 0) return null;
+    const startMs = (clusterTimecode + relTime) * (timecodeScale / 1000000);
+    return { trackNumber, startTime: startMs, endTime: null, data };
+}
+
+// ===== Decode subtitle text from raw block bytes =====
+function decodeSubtitle(data, codecId) {
+    let start = 0;
+    if (data.length >= 3 && data[0] === 0xEF && data[1] === 0xBB && data[2] === 0xBF) start = 3;
+    let end = data.length;
+    while (end > start && data[end - 1] === 0) end--;
+    const bytes = data.slice(start, end);
+    let text = new TextDecoder().decode(bytes);
+    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    if (codecId === 'S_TEXT/UTF8' || codecId === 'S_TEXT/ASCII') {
+        return text.trim();
+    }
+    if (codecId === 'S_TEXT/ASS' || codecId === 'S_TEXT/SSA') {
+        return extractASSText(text);
+    }
+    return text.trim();
+}
+
+function extractASSText(text) {
+    let line = text.trim();
+    if (line.startsWith('Dialogue:')) line = line.substring(9).trim();
+    const parts = line.split(',');
+    // Dialogue: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    if (parts.length >= 10) return cleanASS(parts.slice(9).join(','));
+    if (parts.length >= 9) return cleanASS(parts.slice(8).join(','));
+    if (parts.length >= 3) return cleanASS(parts.slice(-1)[0]);
+    return cleanASS(line);
+}
+
+function cleanASS(text) {
+    text = text.replace(/\{[^}]*\}/g, '');
+    text = text.replace(/\\N/g, '\n');
+    text = text.replace(/\\n/g, '\n');
+    text = text.replace(/\\h/g, ' ');
+    return text.trim();
+}
+
+// ===== SRT time formatter =====
+function formatSRTTime(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const mil = Math.floor(ms % 1000);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(mil).padStart(3,'0')}`;
+}
+
+function generateSRT(blocks) {
+    if (!blocks.length) return '';
+    let out = '';
+    blocks.forEach((b, i) => {
+        out += `${i + 1}\n${formatSRTTime(b.startTime)} --> ${formatSRTTime(b.endTime)}\n${b.text}\n\n`;
+    });
+    return out;
+}
+
+function assignEndTimes(blocks) {
+    for (let i = 0; i < blocks.length; i++) {
+        if (blocks[i].endTime == null) {
+            if (i < blocks.length - 1) {
+                blocks[i].endTime = blocks[i + 1].startTime - 100;
+                if (blocks[i].endTime <= blocks[i].startTime) blocks[i].endTime = blocks[i].startTime + 2000;
+            } else {
+                blocks[i].endTime = blocks[i].startTime + 3000;
+            }
+        }
+    }
+}
+
+// ===== Main Extraction =====
+async function extractMKV(file, onProgress, onLog) {
+    const buffer = await file.arrayBuffer();
+    const parser = new MKVParser(buffer);
+    onLog(`Loaded ${formatBytes(file.size)}`);
+
+    // Verify EBML header
+    if (parser.length < 4) throw new Error('File too small');
+    const sig = (parser.data[0] << 24) | (parser.data[1] << 16) | (parser.data[2] << 8) | parser.data[3];
+    if (sig !== ID_EBML) {
+        // Try scanning first 64KB for EBML header
+        let found = false;
+        for (let i = 0; i < Math.min(parser.length - 4, 65536); i++) {
+            const s = (parser.data[i] << 24) | (parser.data[i+1] << 16) | (parser.data[i+2] << 8) | parser.data[i+3];
+            if (s === ID_EBML) { parser.setOffset(i); found = true; break; }
+        }
+        if (!found) throw new Error('Not a valid MKV/WebM file (EBML header not found)');
+        onLog('EBML header found after scanning');
+    }
+
+    const ebml = parser.readElement();
+    if (!ebml || ebml.id !== ID_EBML) throw new Error('EBML header read error');
+    if (!ebml.unknown) parser.setOffset(ebml.dataOffset + ebml.size);
+    else {
+        // Unknown-size EBML header: parse children until we find Segment
+        while (parser.getOffset() < parser.length) {
+            const ch = parser.readElement();
+            if (!ch) break;
+            if (ch.id === ID_SEGMENT) { parser.setOffset(ch.dataOffset - (ch.length || 4)); break; } // rewind to re-read
+            if (!ch.unknown) parser.setOffset(ch.dataOffset + ch.size);
+            else break;
+        }
+    }
+
+    const segment = parser.readElement();
+    if (!segment || segment.id !== ID_SEGMENT) throw new Error('No Segment element found');
+    const segEnd = segment.unknown ? parser.length : segment.dataOffset + segment.size;
+
+    onProgress(5);
+    onLog('Scanning segment...');
+
+    let timecodeScale = 1000000;
+    const subTracks = [];
+    const allBlocks = [];
+    const trackMap = new Map();
+
+    parser.setOffset(segment.dataOffset);
+    while (parser.getOffset() < segEnd) {
+        const el = parser.readElement();
+        if (!el) break;
+        const elEnd = el.unknown ? segEnd : el.dataOffset + el.size;
+
+        if (el.id === ID_INFO) {
+            parser.setOffset(el.dataOffset);
+            while (parser.getOffset() < elEnd) {
+                const ch = parser.readElement();
+                if (!ch) break;
+                if (ch.id === ID_TIMECODE_SCALE) timecodeScale = parser.readUInt(ch.size);
+                else if (!ch.unknown) parser.setOffset(ch.dataOffset + ch.size);
+                else break;
+            }
+        } else if (el.id === ID_TRACKS) {
+            parser.setOffset(el.dataOffset);
+            while (parser.getOffset() < elEnd) {
+                const ch = parser.readElement();
+                if (!ch) break;
+                if (ch.id === ID_TRACK_ENTRY) {
+                    const tr = parseTrackEntry(parser, ch.dataOffset, ch.size, elEnd);
+                    if (tr.type === SUBTITLE_CODEC) {
+                        const idx = subTracks.length;
+                        subTracks.push(tr);
+                        trackMap.set(tr.number, idx);
+                        onLog(`Found subtitle track #${tr.number}: ${tr.codecId} [${tr.language}]`);
+                    }
+                } else if (!ch.unknown) {
+                    parser.setOffset(ch.dataOffset + ch.size);
+                } else {
+                    break;
+                }
+            }
+        } else if (el.id === ID_CLUSTER) {
+            // Parse cluster immediately
+            parser.setOffset(el.dataOffset);
+            let cTime = 0;
+            while (parser.getOffset() < elEnd) {
+                const ch = parser.readElement();
+                if (!ch) break;
+                const chEnd = ch.unknown ? elEnd : ch.dataOffset + ch.size;
+
+                if (ch.id === ID_CLUSTER_TIMECODE) {
+                    cTime = parser.readUInt(ch.size);
+                } else if (ch.id === ID_SIMPLE_BLOCK) {
+                    const blk = parseBlock(parser, ch.dataOffset, ch.size, cTime, timecodeScale);
+                    if (blk && trackMap.has(blk.trackNumber)) {
+                        allBlocks.push({ ...blk, trackIndex: trackMap.get(blk.trackNumber) });
+                    }
+                } else if (ch.id === ID_BLOCK_GROUP) {
+                    parser.setOffset(ch.dataOffset);
+                    let blk = null, dur = null;
+                    while (parser.getOffset() < chEnd) {
+                        const bg = parser.readElement();
+                        if (!bg) break;
+                        if (bg.id === ID_BLOCK) {
+                            blk = parseBlock(parser, bg.dataOffset, bg.size, cTime, timecodeScale);
+                        } else if (bg.id === ID_BLOCK_DURATION) {
+                            dur = parser.readUInt(bg.size);
+                        } else if (!bg.unknown) {
+                            parser.setOffset(bg.dataOffset + bg.size);
+                        } else break;
+                    }
+                    if (blk && trackMap.has(blk.trackNumber)) {
+                        allBlocks.push({
+                            ...blk,
+                            trackIndex: trackMap.get(blk.trackNumber),
+                            endTime: dur ? dur * (timecodeScale / 1000000) : null
+                        });
+                    }
+                    parser.setOffset(chEnd);
+                } else if (!ch.unknown) {
+                    parser.setOffset(chEnd);
+                } else {
+                    break;
+                }
+            }
+            onProgress(5 + Math.floor((parser.getOffset() / segEnd) * 90));
+            await new Promise(r => setTimeout(r, 0));
+        } else if (el.id === ID_VOID) {
+            parser.setOffset(elEnd);
+        } else {
+            // Skip unknown element
+            if (!el.unknown) parser.setOffset(elEnd);
+            else break;
+        }
+    }
+
+    onProgress(95);
+    onLog(`Parsed ${allBlocks.length} subtitle block(s)`);
+
+    if (subTracks.length === 0) return { tracks: [], srts: [] };
+
+    // Group, sort, decode, and build SRTs
+    const trackBlocks = subTracks.map(() => []);
+    for (const b of allBlocks) trackBlocks[b.trackIndex].push(b);
+
+    const srts = [];
+    for (let i = 0; i < subTracks.length; i++) {
+        trackBlocks[i].sort((a, b) => a.startTime - b.startTime);
+        for (const b of trackBlocks[i]) {
+            b.text = decodeSubtitle(b.data, subTracks[i].codecId);
+        }
+        assignEndTimes(trackBlocks[i]);
+        const content = generateSRT(trackBlocks[i]);
+        const base = file.name.replace(/\.(mkv|webm)$/i, '');
+        const lang = subTracks[i].language || 'und';
+        const name = subTracks[i].name ? `_${subTracks[i].name.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+        const filename = `${base}_${lang}${name}.srt`;
+        srts.push({ track: subTracks[i], content, filename, count: trackBlocks[i].length });
+    }
+
+    onProgress(100);
+    onLog('Done!');
+    return { tracks: subTracks, srts };
+}
+
+// ===== Client-side Language Detection =====
+function detectLanguage(srtContent) {
+    const lines = srtContent.split('\n');
+    const textLines = lines.filter(l => l.trim() && !/^\d+$/.test(l.trim()) && !l.includes('-->'));
+    const sample = textLines.slice(0, 60).join(' ');
+    if (!sample.trim()) return Promise.resolve('Unknown');
+    return Promise.resolve(detectLang(sample));
+}
+
+function detectLang(text) {
+    const counts = countScripts(text);
+    const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+    const pct = k => (counts[k] || 0) / total;
+
+    if (pct('arabic')   > 0.25) return 'Arabic';
+    if (pct('hebrew')   > 0.25) return 'Hebrew';
+    if (pct('thai')     > 0.25) return 'Thai';
+    if (pct('greek')    > 0.25) return 'Greek';
+    if (pct('devanagari') > 0.25) return 'Hindi';
+    if (pct('hangul')   > 0.15) return 'Korean';
+    if (pct('cyrillic') > 0.25) return detectCyrillic(text);
+    if (pct('hiragana') + pct('katakana') > 0.10) return 'Japanese';
+    if (pct('cjk')      > 0.20) return 'Chinese';
+
+    // Latin-script: use stopword frequency
+    return detectLatinLang(text.toLowerCase());
+}
+
+function countScripts(text) {
+    const c = { arabic:0, hebrew:0, cyrillic:0, greek:0, thai:0, devanagari:0,
+                 hiragana:0, katakana:0, hangul:0, cjk:0, latin:0 };
+    for (const ch of text) {
+        const cp = ch.codePointAt(0);
+        if (cp >= 0x0600 && cp <= 0x06FF) c.arabic++;
+        else if (cp >= 0x0590 && cp <= 0x05FF) c.hebrew++;
+        else if (cp >= 0x0400 && cp <= 0x04FF) c.cyrillic++;
+        else if (cp >= 0x0370 && cp <= 0x03FF) c.greek++;
+        else if (cp >= 0x0E00 && cp <= 0x0E7F) c.thai++;
+        else if (cp >= 0x0900 && cp <= 0x097F) c.devanagari++;
+        else if (cp >= 0x3040 && cp <= 0x309F) c.hiragana++;
+        else if (cp >= 0x30A0 && cp <= 0x30FF) c.katakana++;
+        else if (cp >= 0xAC00 && cp <= 0xD7AF) c.hangul++;
+        else if (cp >= 0x4E00 && cp <= 0x9FFF) c.cjk++;
+        else if ((cp >= 0x0041 && cp <= 0x007A) || (cp >= 0x00C0 && cp <= 0x024F)) c.latin++;
+    }
+    return c;
+}
+
+function detectCyrillic(text) {
+    // Ukrainian has ї, і, є, ґ; Bulgarian has specific patterns
+    if (/[їієґ]/i.test(text)) return 'Ukrainian';
+    if (/\b(и|на|се|да|не|за|от|но|ни|го)\b/i.test(text)) return 'Bulgarian';
+    return 'Russian';
+}
+
+function detectLatinLang(t) {
+    const stopwords = {
+        'English':    ['the','and','that','this','with','have','for','not','you','are','was','but','his','they','from'],
+        'Spanish':    ['que','los','una','para','con','por','del','las','pero','más','este','como','todo','sus','hay'],
+        'French':     ['les','des','est','une','pas','que','dans','qui','sur','par','mais','tout','elle','vous','nous'],
+        'German':     ['die','und','der','das','ist','ich','ein','nicht','sie','mit','den','dem','hat','wie','auf'],
+        'Italian':    ['che','per','non','con','una','del','sono','alla','questo','più','anche','come','quando','loro','tutto'],
+        'Portuguese': ['que','não','para','com','uma','por','dos','mas','são','mais','esse','como','foi','isso','ele'],
+        'Dutch':      ['het','een','van','zijn','dat','niet','met','voor','ook','bij','maar','door','dit','kan','hem'],
+        'Polish':     ['się','nie','jest','jak','że','ale','już','tak','to','na','go','co','by','po','do'],
+        'Swedish':    ['och','det','att','som','den','för','på','är','med','inte','har','till','av','sig','men'],
+        'Turkish':    ['bir','bu','da','de','ile','ben','var','için','olan','ama','daha','çok','beni','sen','ne'],
+    };
+
+    const words = t.match(/\b[a-záàâäãåæçéèêëíìîïñóòôöõøœúùûüý]+\b/g) || [];
+    if (!words.length) return 'Unknown';
+    const scores = {};
+    for (const [lang, list] of Object.entries(stopwords)) {
+        const set = new Set(list);
+        scores[lang] = words.filter(w => set.has(w)).length;
+    }
+    const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+    return best[1] > 0 ? best[0] : 'Unknown';
+}
+
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const progressBox = document.getElementById('progressBox');
+const progressFill = document.getElementById('progressFill');
+const statusText = document.getElementById('statusText');
+const logBox = document.getElementById('log');
+const results = document.getElementById('results');
+const tracksList = document.getElementById('tracksList');
+const downloadAllBtn = document.getElementById('downloadAll');
+
+let currentResults = null;
+
+function setProgress(pct) {
+    progressFill.style.width = pct + '%';
+    statusText.textContent = pct < 100 ? `Processing... ${pct}%` : 'Complete';
+}
+function addLog(msg) {
+    const d = document.createElement('div');
+    d.textContent = `> ${msg}`;
+    logBox.appendChild(d);
+    logBox.scrollTop = logBox.scrollHeight;
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+async function handleFile(file) {
+    if (!file.name.match(/\.(mkv|webm)$/i)) { alert('Please select an MKV or WebM file'); return; }
+
+    results.classList.remove('visible');
+    progressBox.classList.add('visible');
+    setProgress(0);
+    logBox.innerHTML = '';
+    addLog(`File: ${file.name}`);
+
+    try {
+        const data = await extractMKV(file, setProgress, addLog);
+        currentResults = data;
+        renderResults(data);
+        progressBox.classList.remove('visible');
+
+        // Detect language for each track asynchronously
+        data.srts.forEach((srt, idx) => {
+            const badge = document.getElementById(`lang-badge-${idx}`);
+            if (!badge) return;
+            detectLanguage(srt.content).then(lang => {
+                srt.detectedLanguage = lang;
+                badge.textContent = lang;
+                badge.className = 'badge badge-lang';
+            });
+        });
+    } catch (err) {
+        addLog(`Error: ${err.message}`);
+        setProgress(100);
+        progressFill.style.background = '#e74c3c';
+        statusText.textContent = 'Failed';
+    }
+}
+
+function renderResults(data) {
+    tracksList.innerHTML = '';
+    if (data.srts.length === 0) {
+        tracksList.innerHTML = '<div class="empty-state">No subtitle tracks found in this file.</div>';
+        downloadAllBtn.style.display = 'none';
+    } else {
+        downloadAllBtn.style.display = 'block';
+        data.srts.forEach((srt, idx) => {
+            const card = document.createElement('div');
+            card.className = 'track-card';
+            const tr = srt.track;
+            card.innerHTML = `
+                <div class="track-header">
+                    <div>
+                        <div class="track-title">${escapeHtml(tr.name || 'Subtitle Track')} <span class="badge badge-sub">${tr.language || 'und'}</span> <span class="badge badge-detecting" id="lang-badge-${idx}">Detecting…</span></div>
+                        <div class="track-meta">${escapeHtml(tr.codecId)} • ${srt.count} lines • ${formatBytes(srt.content.length)}</div>
+                    </div>
+                    <button class="download-btn" data-idx="${idx}">Download SRT</button>
+                </div>
+            `;
+            tracksList.appendChild(card);
+        });
+
+        tracksList.querySelectorAll('.download-btn').forEach(btn => {
+            btn.addEventListener('click', () => downloadSRT(parseInt(btn.dataset.idx)));
+        });
+    }
+    results.classList.add('visible');
+}
+
+function downloadSRT(idx) {
+    const srt = currentResults.srts[idx];
+    const blob = new Blob([srt.content], { type: 'text/srt;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = srt.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+downloadAllBtn.addEventListener('click', async () => {
+    if (!currentResults) return;
+    const zip = new JSZip();
+    currentResults.srts.forEach(s => zip.file(s.filename, s.content));
+    progressBox.classList.add('visible');
+    const blob = await zip.generateAsync({ type: 'blob' }, meta => {
+        setProgress(Math.floor(meta.percent));
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = currentResults.srts[0].filename.replace(/\.srt$/, '_all.zip');
+    a.click();
+    URL.revokeObjectURL(url);
+    progressBox.classList.remove('visible');
+});
+
+function formatBytes(b) {
+    if (b === 0) return '0 B';
+    const k = 1024, sizes = ['B','KB','MB','GB'];
+    const i = Math.floor(Math.log(b) / Math.log(k));
+    return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+</body>
+</html>
