@@ -6,128 +6,226 @@
     <title>MKV Subtitle Extractor</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
+        :root {
+            --bg-base:    #0d0d0f;
+            --bg-surface: #141418;
+            --bg-card:    #1c1c22;
+            --bg-hover:   #222228;
+            --border:     rgba(255,255,255,0.08);
+            --border-accent: rgba(99,179,237,0.5);
+            --accent:     #63b3ed;
+            --accent2:    #9f7aea;
+            --green:      #68d391;
+            --orange:     #f6ad55;
+            --text-pri:   #f0f0f5;
+            --text-sec:   #9090a8;
+            --text-muted: #5a5a72;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            background: var(--bg-base);
             min-height: 100vh;
-            color: #fff;
+            color: var(--text-pri);
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 2rem 1rem;
+            padding: 2.5rem 1rem;
         }
-        .container { max-width: 900px; width: 100%; }
-        h1 { font-size: 2.5rem; margin-bottom: 0.5rem; text-align: center; font-weight: 700; }
-        .subtitle { text-align: center; opacity: 0.85; margin-bottom: 2rem; font-size: 1.1rem; }
+
+        /* Subtle noise texture overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container { max-width: 860px; width: 100%; position: relative; z-index: 1; }
+
+        /* Header */
+        .header { text-align: center; margin-bottom: 2.5rem; }
+        .header-icon {
+            width: 52px; height: 52px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border-radius: 14px;
+            display: inline-flex; align-items: center; justify-content: center;
+            margin-bottom: 1rem;
+            box-shadow: 0 0 30px rgba(99,179,237,0.25);
+        }
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 30%, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.4rem;
+        }
+        .subtitle { color: var(--text-sec); font-size: 1rem; }
+
+        /* Drop zone */
         .drop-zone {
-            border: 3px dashed rgba(255,255,255,0.3);
-            border-radius: 16px;
+            border: 2px dashed var(--border);
+            border-radius: 18px;
             padding: 3rem 2rem;
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(10px);
+            background: var(--bg-surface);
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.25s ease;
             margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .drop-zone::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 0%, rgba(99,179,237,0.06) 0%, transparent 70%);
+            pointer-events: none;
         }
         .drop-zone:hover, .drop-zone.drag-over {
-            border-color: #00d4ff;
-            background: rgba(0,212,255,0.1);
+            border-color: var(--accent);
+            background: rgba(99,179,237,0.05);
             transform: translateY(-2px);
+            box-shadow: 0 0 40px rgba(99,179,237,0.12);
         }
-        .drop-zone svg { width: 64px; height: 64px; margin-bottom: 1rem; opacity: 0.8; }
-        .drop-text { font-size: 1.2rem; font-weight: 500; }
-        .drop-hint { font-size: 0.9rem; opacity: 0.6; margin-top: 0.5rem; }
+        .drop-zone svg { width: 52px; height: 52px; margin-bottom: 1rem; color: var(--accent); opacity: 0.9; }
+        .drop-text { font-size: 1.15rem; font-weight: 600; color: var(--text-pri); }
+        .drop-hint { font-size: 0.875rem; color: var(--text-muted); margin-top: 0.5rem; }
         input[type="file"] { display: none; }
 
+        /* Progress */
         .progress-box {
             display: none;
-            background: rgba(255,255,255,0.08);
-            border-radius: 12px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
-            backdrop-filter: blur(10px);
         }
         .progress-box.visible { display: block; }
+        #statusText { font-weight: 600; color: var(--text-pri); font-size: 0.95rem; }
         .progress-bar {
-            width: 100%; height: 10px;
-            background: rgba(255,255,255,0.15);
-            border-radius: 5px;
+            width: 100%; height: 6px;
+            background: rgba(255,255,255,0.07);
+            border-radius: 3px;
             overflow: hidden;
             margin: 1rem 0;
         }
         .progress-fill {
             height: 100%; width: 0%;
-            background: linear-gradient(90deg, #00d4ff, #0099cc);
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
             transition: width 0.3s ease;
-            border-radius: 5px;
+            border-radius: 3px;
         }
-        .log { font-family: 'Courier New', monospace; font-size: 0.85rem; opacity: 0.8; margin-top: 0.5rem; max-height: 120px; overflow-y: auto; }
-        .log div { margin: 2px 0; }
+        .log {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            color: var(--text-sec);
+            margin-top: 0.5rem;
+            max-height: 110px;
+            overflow-y: auto;
+        }
+        .log div { margin: 3px 0; }
+        .log::-webkit-scrollbar { width: 4px; }
+        .log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+        /* Results */
         .results {
             display: none;
-            background: rgba(255,255,255,0.95);
-            color: #1a1a2e;
-            border-radius: 12px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
             padding: 1.5rem;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.5);
         }
         .results.visible { display: block; }
-        .results h2 { color: #0f3460; margin-bottom: 1rem; font-size: 1.3rem; }
-        .track-card {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            border-left: 4px solid #0099cc;
+        .results h2 {
+            color: var(--text-pri);
+            margin-bottom: 1.25rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            display: flex; align-items: center; gap: 0.5rem;
         }
+        .results h2::before {
+            content: '';
+            display: inline-block;
+            width: 4px; height: 18px;
+            background: linear-gradient(to bottom, var(--accent), var(--accent2));
+            border-radius: 2px;
+        }
+
+        /* Track card */
+        .track-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 0.875rem;
+            transition: background 0.2s;
+        }
+        .track-card:hover { background: var(--bg-hover); }
         .track-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.4rem;
             flex-wrap: wrap;
             gap: 0.5rem;
         }
-        .track-title { font-weight: 700; font-size: 1.05rem; color: #1a1a2e; }
-        .track-meta { font-size: 0.85rem; color: #666; }
+        .track-title { font-weight: 700; font-size: 1rem; color: var(--text-pri); display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+        .track-meta { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem; }
+
+        /* Badges */
         .badge {
             display: inline-block;
-            padding: 0.25rem 0.75rem;
+            padding: 0.2rem 0.65rem;
             border-radius: 20px;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             font-weight: 700;
+            letter-spacing: 0.4px;
             text-transform: uppercase;
         }
-        .badge-sub { background: #e3f2fd; color: #1565c0; }
-        .badge-count { background: #e8f5e9; color: #2e7d32; }
-        .badge-lang { background: #fff3e0; color: #e65100; }
-        .badge-detecting { background: #f3e5f5; color: #6a1b9a; animation: pulse 1.2s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        .badge-sub     { background: rgba(99,179,237,0.15); color: var(--accent); border: 1px solid rgba(99,179,237,0.25); }
+        .badge-count   { background: rgba(104,211,145,0.12); color: var(--green); border: 1px solid rgba(104,211,145,0.2); }
+        .badge-lang    { background: rgba(246,173,85,0.12); color: var(--orange); border: 1px solid rgba(246,173,85,0.2); text-transform: none; font-size: 0.75rem; }
+        .badge-detecting { background: rgba(159,122,234,0.12); color: var(--accent2); border: 1px solid rgba(159,122,234,0.2); animation: pulse 1.2s infinite; text-transform: none; font-size: 0.75rem; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+
+        /* Buttons */
         .download-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: #fff;
             border: none;
-            padding: 0.6rem 1.2rem;
+            padding: 0.55rem 1.1rem;
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             transition: all 0.2s;
+            white-space: nowrap;
         }
-        .download-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+        .download-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(124,58,237,0.45); }
         .download-all {
             width: 100%;
             margin-top: 1rem;
             padding: 0.875rem;
-            font-size: 1rem;
-            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            font-size: 0.95rem;
+            background: linear-gradient(135deg, #0d9488, #059669);
+            letter-spacing: 0.2px;
         }
-        .empty-state { text-align: center; padding: 2rem; color: #666; }
+        .download-all:hover { box-shadow: 0 4px 20px rgba(5,150,105,0.4); }
+
+        .empty-state { text-align: center; padding: 2.5rem; color: var(--text-muted); }
+
         @media (max-width: 600px) {
-            h1 { font-size: 1.8rem; }
+            h1 { font-size: 1.7rem; }
             .drop-zone { padding: 2rem 1rem; }
         }
     </style>
@@ -135,8 +233,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>MKV Subtitle Extractor</h1>
-        <p class="subtitle">Extract all subtitle tracks from MKV files directly in your browser</p>
+        <div class="header">
+            <div class="header-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+                    <path d="M7 10l2 2 4-4" stroke="#fff" stroke-width="2.2"/>
+                </svg>
+            </div>
+            <h1>MKV Subtitle Extractor</h1>
+            <p class="subtitle">Extract all subtitle tracks from MKV files directly in your browser</p>
+        </div>
 
         <div class="drop-zone" id="dropZone">
             <input type="file" id="fileInput" accept=".mkv,.webm,video/x-matroska">
